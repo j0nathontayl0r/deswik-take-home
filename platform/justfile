@@ -1,0 +1,59 @@
+# Terraform workflow for platform stack
+
+# List available workspaces
+list:
+    @ls workspaces/*.yaml | sed 's|workspaces/||;s|.yaml||'
+
+# Interactive workspace selector - use with: eval $(just select-workspace)
+select-workspace:
+    @echo "export WORKSPACE=$(ls workspaces/*.yaml | sed 's|workspaces/||;s|.yaml||' | gum choose --header 'Select workspace:')"
+
+# Initialize terraform
+init:
+    terraform init
+
+# Interactive plan - select workspace with TUI
+plan:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export WORKSPACE=$(ls workspaces/*.yaml | sed 's|workspaces/||;s|.yaml||' | gum choose --header "Select workspace to plan:")
+    echo "Planning workspace: $WORKSPACE"
+    terraform workspace select "$WORKSPACE"
+    terraform plan -out=".terraform-plan-$WORKSPACE"
+
+# Apply the plan for $WORKSPACE (set by plan or select-workspace)
+apply:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "${WORKSPACE:-}" ]]; then
+        echo "Error: WORKSPACE not set. Run 'just plan' or 'eval \$(just select-workspace)' first."
+        exit 1
+    fi
+    echo "Applying workspace: $WORKSPACE"
+    terraform workspace select "$WORKSPACE"
+    terraform apply ".terraform-plan-$WORKSPACE"
+
+# Deploy (plan + apply) for a specific workspace - no interactive selection
+deploy workspace:
+    terraform workspace select {{workspace}}
+    terraform plan -out=.terraform-plan-{{workspace}}
+    terraform apply .terraform-plan-{{workspace}}
+
+# Run plan with refresh only
+refresh workspace:
+    terraform workspace select {{workspace}}
+    terraform plan -refresh-only -out=.terraform-plan-refresh-{{workspace}}
+
+# Destroy (with confirmation)
+destroy workspace:
+    terraform workspace select {{workspace}}
+    terraform destroy
+
+# Validate terraform files
+validate:
+    terraform validate
+
+# Format terraform files
+fmt:
+    terraform fmt -recursive
+

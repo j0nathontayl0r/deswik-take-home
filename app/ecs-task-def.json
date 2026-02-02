@@ -1,0 +1,43 @@
+{
+  "family": "hello-deswik-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::231192882420:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::231192882420:role/hello-deswik-task",
+  "containerDefinitions": [
+    {
+      "name": "hello-deswik-api",
+      "image": "IMAGE_URI",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "ASPNETCORE_ENVIRONMENT", "value": "Production" },
+        { "name": "DB_HOST", "value": "deswik-mssql.cluster-abcdefg.ap-southeast-2.rds.amazonaws.com" },
+        { "name": "DB_PORT", "value": "1433" },
+        { "name": "DB_NAME", "value": "deswikdb" },
+        { "name": "DB_USER", "value": "appuser" }
+      ],
+      "secrets": [
+        {
+          "name": "DB_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:ap-southeast-2:231192882420:secret:hello-deswik/db"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/hello-deswik-api",
+          "awslogs-region": "ap-southeast-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+aws_region: ap-southeast-2
+aws_account_id: "231192882420"
+org_name: jdtay
+account_name: prod
+network:
+  enabled: true
+  name: prod
+  vpc_cidr: 172.10.0.0/16 # NOTE: change this cidr for each environment
+  vpc_newbits: 4 # size of subnets:  16 + 4 = /20
+  nat: true
+  multi_nat: false
+  interview_app:
+    name: "hello-deswik-api"
+    architecture_pattern: "network/module/network"
+    public_subnet_tier: "ALB"
+    private_subnet_tier: "ECS + RDS"
+    security_groups:
+      - name: "hello-deswik-alb-sg"
+        inbound: ["443/tcp"]
+        outbound: ["all"]
+      - name: "hello-deswik-ecs-sg"
+        inbound: ["from-alb:8080/tcp"]
+        outbound: ["to-rds:1433/tcp", "https:443/tcp"]
+      - name: "hello-deswik-rds-sg"
+        inbound: ["from-ecs:1433/tcp"]
+        outbound: ["none"]
+    notes:
+      - "ECS tasks and Aurora MSSQL v1 stay in private subnets."
+      - "ALB is public, targets ECS tasks on 8080."
+      - "CIDR rules align with the VPC CIDR and subnetting above."
+  public_nacl_inbound_tcp_ports: [80, 443, 22]
+  public_nacl_outbound_tcp_ports: [0]
+  vpc_endpoints: []
+  vpc_endpoint_dynamodb_gateway: false
+  vpc_endpoint_s3_gateway: true
+  peering: []
+
+domain:
+  enabled: true
+  zones:
+    - route53_domain: prod.jdtay.com.au
+      private: false  # Changing this param requires tainting the resource
+
+acm:
+  certificates:
+    - name: default
+      domain_names:
+        - "jdtay.com.au"
+        - "*.jdtay.com.au"
+        - "prod.jdtay.com.au"
+        - "*.prod.jdtay.com.au"
+      hosted_zone: prod.jdtay.com.au
+    - name: default-us
+      global: true
+      domain_names:
+        - "jdtay.com.au"
+        - "*.jdtay.com.au"
+        - "prod.jdtay.com.au"
+        - "*.prod.jdtay.com.au"
+      hosted_zone: prod.jdtay.com.au

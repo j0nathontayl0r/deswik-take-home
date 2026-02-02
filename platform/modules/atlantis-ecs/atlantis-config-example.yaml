@@ -1,0 +1,109 @@
+# ============================================================================
+# Example Atlantis Configuration for Platform Workspace
+# ============================================================================
+# Add this configuration block to your workspace YAML files:
+#
+# - jdtay-stg-ap-southeast-2-default.yaml (for staging Atlantis)
+# - jdtay-prod-ap-southeast-2-default.yaml (for production Atlantis)
+#
+# For workspaces where you DON'T want Atlantis deployed, either:
+# 1. Omit the atlantis block entirely, OR
+# 2. Set enabled: false
+
+# ============================================================================
+# OPTION 1: Enable Atlantis (staging/production only)
+# ============================================================================
+atlantis:
+  enabled: true  # Set to false to disable Atlantis deployment
+
+  cluster_name: "jdtay-stg-cluster"  # ECS cluster where Atlantis will run
+
+  # DNS and Certificate Configuration
+  hostname: "atlantis.stg.jdtay.com.au"  # FQDN for Atlantis
+  certificate_arn: "arn:aws:acm:ap-southeast-2:231192882420:certificate/9e08fb51-6595-4f9e-8714-e9886905db08"
+
+  # Route53 Configuration (optional)
+  create_dns_record: true  # Set to true if you want Terraform to create the DNS record
+  hosted_zone: "stg.jdtay.com.au"
+
+  # GitHub Configuration
+  repo_allowlist: "github.com/get-jdtay/jdtay-infra"  # Only this repo can use Atlantis
+  github_user: "get-jdtay-bot"  # GitHub username for Atlantis (e.g., your bot account or organization)
+
+  # IAM Roles that Atlantis can assume for deployments
+  # These roles must exist in each AWS account
+  allowed_assume_role_arns:
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"  # audit
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"  # dev
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"  # staging
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"  # production
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"  # shared
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"  # devsecops
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"  # sandbox
+
+  # Security Configuration
+  allowed_cidr_blocks:
+    - "0.0.0.0/0"  # Restrict this to your office/VPN IPs for better security
+
+  # Container Configuration
+  image: "ghcr.io/runatlantis/atlantis:v0.37.0"
+  cpu: 512
+  memory: 1024
+  desired_count: 1
+
+  # Logging and Storage
+  log_retention_days: 30
+  lb_access_logs_bucket: "jdtay-audit-alb-access-logs-ap-southeast-2"
+  enable_deletion_protection: false  # Set to true in production
+
+  # Optional: Extra environment variables for Atlantis
+  extra_environment_variables: []
+  # Example:
+  # - name: "ATLANTIS_LOG_LEVEL"
+  #   value: "debug"
+  # - name: "ATLANTIS_TFE_TOKEN"
+  #   value: "..."
+
+# ============================================================================
+# OPTION 2: Disable Atlantis (all other workspaces)
+# ============================================================================
+# For workspaces like dev, devsecops, shared, etc., either:
+#
+# A) Don't include the atlantis block at all (recommended), OR
+# B) Explicitly disable it:
+
+# atlantis:
+#   enabled: false
+
+# ============================================================================
+# Production Example Configuration
+# ============================================================================
+# For jdtay-prod-ap-southeast-2-default.yaml:
+#
+# atlantis:
+#   enabled: true
+#   cluster_name: "jdtay-prod-cluster"
+#   hostname: "atlantis.prod.jdtay.com.au"
+#   certificate_arn: "arn:aws:acm:ap-southeast-2:231192882420:certificate/4a9520bc-f003-42ba-8509-9d6bde371866"
+#   create_dns_record: true
+#   hosted_zone: "prod.jdtay.com.au"
+#   repo_allowlist: "github.com/get-jdtay/jdtay-infra"
+#   github_user: "get-jdtay-bot"
+#   allowed_assume_role_arns:
+#     - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+#     - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+#     - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+#     - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+#     - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+#     - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+#     - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+#   allowed_cidr_blocks:
+#     - "0.0.0.0/0"  # Restrict to office IPs
+#   image: "ghcr.io/runatlantis/atlantis:v0.37.0"
+#   cpu: 1024
+#   memory: 2048
+#   desired_count: 1
+#   log_retention_days: 90
+#   lb_access_logs_bucket: "jdtay-audit-alb-access-logs-ap-southeast-2"
+#   enable_deletion_protection: true
+#   extra_environment_variables: []

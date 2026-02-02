@@ -1,0 +1,846 @@
+aws_region: ap-southeast-2
+aws_account_id: "231192882420"
+org_name: jdtay
+account_name: prod
+notifications_sns_topic_arn: "arn:aws:sns:ap-southeast-2:231192882420:jdtay" # from Audit account
+sns_topic_arn:
+  - arn:aws:sns:ap-southeast-2:231192882420:jdtay # from Audit account
+environment: prod
+interview_design:
+  title: "Take Home DevOps Test - MVP"
+  note: "Pseudo configuration for interview discussion. Not intended for production use."
+  architecture_diagram: |
+    +---------------------------+        +-------------------+
+    | GitHub Actions / Atlantis |------->| ECR (image)       |
+    +---------------------------+        +-------------------+
+                 |                                 |
+                 v                                 v
+      +----------------------+         +------------------------+
+      | ALB (public)         |-------->| ECS Fargate Service     |
+      | /health, /           |         | hello-deswik-api        |
+      +----------------------+         +------------------------+
+                                               |
+                                               v
+                                     +-------------------------+
+                                     | Aurora MSSQL v1         |
+                                     | (private subnets)       |
+                                     +-------------------------+
+  explanation:
+    core_infrastructure:
+      - "Compute: ECS Fargate for the Hello World C# app (no servers to manage)."
+      - "Networking: VPC + public ALB + private subnets for ECS/RDS (pattern follows network/module/network)."
+      - "Data: Aurora Microsoft SQL Server v1 cluster for app connectivity."
+    data_migration:
+      - "Target store: Aurora MSSQL v1."
+      - "Strategy: Use AWS DMS or native SQL backup/restore to migrate schema/data, then cut over with validation."
+    security:
+      - "Private subnets for ECS tasks and RDS, SGs allow app -> DB only."
+      - "Secrets via Secrets Manager (connection string)."
+      - "ALB HTTPS, least-privilege IAM roles, CloudWatch logs + alarms."
+    cicd:
+      - "Build container -> push to ECR -> deploy ECS service with new task definition."
+      - "Atlantis manages Terraform plans/applies; OAuth between GitHub and Atlantis is assumed as bootstrap."
+    observability:
+      - "CloudWatch Logs for containers, alarms on CPU and task health."
+      - "ALB access logs and metrics for request visibility."
+  notes:
+    - "Atlantis GitHub OAuth integration is assumed during bootstrap and omitted here for clarity."
+    - "Hello World app returns: 'Hello Deswik, we are connected to SQL Server' when DB connection succeeds."
+ecs:
+  create_iam_service_linked_role: false
+  cloudwatch_dashboards:
+    - name: "jdtay-prod-cluster"
+      cluster_name: "jdtay-prod-cluster"
+      services:
+        - "jdtay-prod-server"
+        - "jdtay-prod-worker"
+        - "hello-deswik-api"
+  clusters:
+    - name: "jdtay-prod-cluster"
+      container_insights: true
+      fargate_only: true
+      alb: true
+      alb_internal: false
+      certificate: default
+      certificate_arn: arn:aws:acm:ap-southeast-2:231192882420:certificate/4a9520bc-f003-42ba-8509-9d6bde371866
+      lb_access_logs_bucket: jdtay-audit-alb-access-logs-ap-southeast-2
+
+  tasks:
+    - name: jdtay-prod-migrations-runner
+      cluster_name: "jdtay-prod-cluster"
+  apps:
+    - name: "jdtay-prod-server"
+      cluster_name: "jdtay-prod-cluster"
+      hostnames:
+        - "app.jdtay.com.au"
+        - "api.jdtay.com.au"
+        - "app.jdtayy.com.au"
+        - "app.jdtayy.co.nz"
+      priority: 30
+      hostname_redirects: ""
+      hostname_create: false
+      alb_only: true
+      paths:
+        - "/*"
+      healthcheck_path: "/api/v2/ping"
+      healthcheck_interval: 60
+      healthcheck_timeout: 30
+      service_health_check_grace_period_seconds: 300
+      cloudwatch_logs_export: true
+      autoscaling_min: 6
+      autoscaling_max: 20
+      autoscaling_min_prod: 6
+      autoscaling_max_prod: 20
+      test_traffic_route_listener_arn: false
+      create_iam_codedeployrole: false
+      launch_type: "FARGATE"
+      fargate_spot: false
+      memory: 512
+      cpu: 256
+      container_port: 3000
+      auth_oidc:
+        enabled: false
+      autoscaling_target_memory: 80
+      shutdown_schedule_prod_1:
+        enabled: true
+        cron_start: "cron(55 13 ? * * *)"
+        cron_stop: "cron(55 14 ? * * *)"
+      shutdown_schedule_prod_2:
+        enabled: true
+        cron_start: "cron(55 23 ? * * *)"
+        cron_stop: "cron(55 01 ? * * *)"
+      codedeploy_wait_time_for_cutover: 0
+      codedeploy_wait_time_for_termination: 5
+    - name: "hello-deswik-api"
+      cluster_name: "jdtay-prod-cluster"
+      hostnames:
+        - "hello.deswik.prod.jdtay.com.au"
+      priority: 40
+      hostname_redirects: ""
+      hostname_create: false
+      alb_only: true
+      paths:
+        - "/*"
+      healthcheck_path: "/health"
+      healthcheck_interval: 30
+      healthcheck_timeout: 10
+      service_health_check_grace_period_seconds: 120
+      cloudwatch_logs_export: true
+      autoscaling_min: 2
+      autoscaling_max: 6
+      autoscaling_target_memory: 70
+      test_traffic_route_listener_arn: false
+      create_iam_codedeployrole: false
+      launch_type: "FARGATE"
+      fargate_spot: false
+      memory: 512
+      cpu: 256
+      container_port: 8080
+      auth_oidc:
+        enabled: false
+      env:
+        - name: "ASPNETCORE_ENVIRONMENT"
+          value: "Production"
+        - name: "DB_HOST"
+          value: "${db.mssql.endpoint}" # pseudo placeholder
+        - name: "DB_PORT"
+          value: "1433"
+        - name: "DB_NAME"
+          value: "deswikdb"
+        - name: "DB_USER"
+          value: "appuser"
+        - name: "DB_PASSWORD_SECRET_ARN"
+          value: "arn:aws:secretsmanager:ap-southeast-2:231192882420:secret:hello-deswik/db"
+    - name: "med-prod-portal-athena"
+      cluster_name: "jdtay-prod-cluster"
+      hostnames:
+        - "athena.jdtay.com.au"
+      priority: 8
+      hostname_redirects: ""
+      hostname_create: false
+      alb_only: true
+      paths:
+        - "/*"
+      healthcheck_path: "/api/health"
+      service_health_check_grace_period_seconds: 300
+      cloudwatch_logs_export: true
+      autoscaling_min: 4
+      autoscaling_max: 20
+      autoscaling_target_memory: 90
+      test_traffic_route_listener_arn: false
+      create_iam_codedeployrole: false
+      launch_type: "FARGATE"
+      fargate_spot: false
+      memory: 512
+      cpu: 256
+      container_port: 8085
+      healthcheck_matcher: "200-301"
+      auth_oidc:
+        enabled: false
+    - name: "med-prod-portal-backend"
+      cluster_name: "jdtay-prod-cluster"
+      hostnames:
+        - "api.med.jdtay.com.au"
+      priority: 7
+      hostname_redirects: ""
+      hostname_create: false
+      alb_only: true
+      paths:
+        - "/*"
+      healthcheck_path: "/health"
+      service_health_check_grace_period_seconds: 300
+      codedeploy_wait_time_for_cutover: 0
+      codedeploy_wait_time_for_termination: 5
+      cloudwatch_logs_export: true
+      autoscaling_min: 5
+      autoscaling_max: 20
+      test_traffic_route_listener_arn: false
+      create_iam_codedeployrole: false
+      launch_type: "FARGATE"
+      fargate_spot: false
+      memory: 512
+      cpu: 256
+      container_port: 3000
+      auth_oidc:
+        enabled: false
+
+  workers:
+    - name: "jdtay-prod-worker"
+      cluster_name: "jdtay-prod-cluster"
+      cloudwatch_logs_export: true
+      launch_type: "FARGATE"
+      fargate_spot: false
+      desired_count: 2
+      memory: 2048
+      cpu: 1024
+    - name: prod-datadog-agent
+      cluster_name: "jdtay-prod-cluster"
+      cloudwatch_logs_export: true
+      launch_type: "FARGATE"
+      fargate_spot: false
+      desired_count: 1
+      memory: 1024
+      cpu: 512
+
+frontend:
+  bucket_kms_key_arn: ""
+  apps:
+    - name: "med-portal-frontend"
+      hostnames: ["med.jdtay.com.au"]
+      acl_enabled: true
+      hostname_create: false
+      certificate_arn: "arn:aws:acm:us-east-1:231192882420:certificate/c94751a1-8a4f-43f2-994a-6db2881fa0ef"
+      hosted_zone: "prod.jdtay.com.au"
+      logging_bucket: "jdtay-cloudfront-access-logs.s3.amazonaws.com"
+      minimum_protocol_version: "TLSv1.2_2021"
+      cloudfront_web_acl_id: "arn:aws:wafv2:us-east-1:231192882420:global/webacl/WAF-Cloudfront/e3358858-5a87-4bae-a60e-0249b7d699d8"
+
+rds:
+  dbs:
+    - name: "deswik-mssql"
+      db_type: "aurora_mssql_v1" # pseudo: Aurora MSSQL v1
+      environment_name: "prod"
+      database_name: "deswikdb"
+      skip_final_snapshot: true
+      identifier: deswik-mssql-v1
+      monitoring: true
+      instance_count: 2
+      auto_minor_version_upgrade: true
+      ecs_cluster_names:
+        - "jdtay-prod-cluster" # allow ECS tasks access to DB
+      allow_from_client_vpns: []
+      user: "appuser"
+      allow_cidrs:
+        - "172.10.80.0/20"
+        - "172.10.96.0/20"
+        - "172.10.112.0/20"
+      enabled_cloudwatch_logs_exports: ["error", "agent"]
+      retention: 7
+      monitoring_interval: 60
+      instance_class: "db.r6g.large"
+      engine: "aurora-mssql"
+      engine_version: "15.00" # pseudo
+      port: 1433
+      parameter_group_name: "default"
+      iam_database_authentication_enabled: false
+      allocated_storage: 100
+      max_allocated_storage: 200
+      apply_immediately: true
+      backup: true
+      storage_encrypted: true
+      kms_key_arn: ""
+      deletion_protection: false
+      secret_method: "secretsmanager"
+    - name: "jdtay-server"
+      db_type: "aurora_serverless_v2"
+      environment_name: "prod"
+      database_name: "jdtaydb"
+      skip_final_snapshot: false
+      identifier: jdtaydb-sl2
+      monitoring: false
+      instance_count: 2
+      auto_minor_version_upgrade: true
+      ecs_cluster_names:
+        - "jdtay-prod-cluster" # Clusters with access to this DB
+      allow_from_client_vpns: [] # Client VPNs with access to this DB
+      user: "master"
+      allow_cidrs: # Allow these CIDRs connect to this DB
+        - "172.10.80.0/20" # from prod private subnetA
+        - "172.10.96.0/20" # from prod private subnetB
+        - "172.10.112.0/20" # from prod private subnetC
+      enabled_cloudwatch_logs_exports: ["postgresql"]
+      retention: 35
+      monitoring_interval: 0
+      instance_class: "db.t4g.medium"
+      engine: "aurora-postgresql"
+      min_capacity: 0.5 # Aurora min capacity
+      max_capacity: 15 # Aurora max capacity
+      port: 5432
+      engine_version: "16.8"
+      parameter_group_name: "default"
+      iam_database_authentication_enabled: true
+      allocated_storage: 100
+      max_allocated_storage: 200
+      apply_immediately: true
+      snapshot_identifier: "prod-jdtay-precutover-snapshot-20251015-2338"
+      shutdown_schedule: # Shuts down the DB at night to save costs (use only on non-production)
+        enabled: false
+        aurora_cluster: true
+        # Weekdays from 6am to 8pm (AEST)
+        cron_stop: "0 8 ? * MON-FRI *" # 8pm AEST -> 10am GMT
+        cron_start: "0 20 ? * SUN-THU *" # 6am AEST -> 8pm GMT
+      backup: true
+      storage_encrypted: true
+      kms_key_arn: ""
+      deletion_protection: true
+      secret_method: "secretsmanager"
+    - name: "jdtay-pharma"
+      db_type: "aurora_serverless_v2"
+      instance_class: "db.t4g.medium"
+      environment_name: "prod"
+      database_name: "jdtaypharma"
+      skip_final_snapshot: false
+      identifier: jdtaypharma-sl2
+      monitoring: true
+      instance_count: 2
+      auto_minor_version_upgrade: true
+      ecs_cluster_names:
+        - "jdtay-prod-cluster" # Clusters with access to this DB
+      allow_from_client_vpns: [] # Client VPNs with access to this DB
+      user: "pharmauser"
+      allow_cidrs: # Allow these CIDRs connect to this DB
+        - "172.10.80.0/20" # from prod private subnetA
+        - "172.10.96.0/20" # from prod private subnetB
+        - "172.10.112.0/20" # from prod private subnetC
+      enabled_cloudwatch_logs_exports: ["postgresql"]
+      retention: 35
+      monitoring_interval: 0
+      engine: "aurora-postgresql"
+      min_capacity: 0.5 # Aurora min capacity
+      max_capacity: 15 # Aurora max capacity
+      port: 5432
+      engine_version: "16.8"
+      parameter_group_name: "default"
+      iam_database_authentication_enabled: true
+      allocated_storage: 100
+      max_allocated_storage: 400
+      apply_immediately: true
+      snapshot_identifier: "precutover-aurorav2-20251211-2035"
+      shutdown_schedule: # Shuts down the DB at night to save costs (use only on non-production)
+        enabled: false
+        aurora_cluster: true
+        # Weekdays from 6am to 8pm (AEST)
+        cron_stop: "0 8 ? * MON-FRI *" # 8pm AEST -> 10am GMT
+        cron_start: "0 20 ? * SUN-THU *" # 6am AEST -> 8pm GMT
+      backup: true
+      storage_encrypted: true
+      kms_key_arn: ""
+      deletion_protection: true
+      secret_method: "secretsmanager"
+
+dms:
+  instance: []
+  endpoint: []
+  task: []
+
+ecr:
+  scan_type: "ENHANCED"
+  scan_frequency: "CONTINUOUS_SCAN"
+  encryption_type: "KMS"
+  trust_account_ids: []
+  repositories:
+    - name: "jdtay-server"
+    - name: "med-portal-athena"
+    - name: "med-portal-backend"
+    - name: "med-portal-frontend"
+    - name: "jdtay-server-rails-seven"
+    - name: "datadog-agent"
+
+ssm:
+  strings: {}
+  secured_strings: []
+  kms_key_arn: "arn:aws:kms:ap-southeast-2:231192882420:key/813838a1-0eda-4017-b561-50f3ff87276c"
+
+secrets_manager:
+  secrets:
+    - name: /jdtay/prod/jdtay_SERVER
+    - name: /jdtay/prod/MED_PORTAL_ATHENA
+    - name: /jdtay/prod/MED_PORTAL_BACKEND
+    - name: /jdtay/prod/TAILSCALE_API_KEY
+    - name: /jdtay/prod/DATADOG_API_KEY
+
+backups:
+  enabled: true
+  name: "prod"
+  rule_schedule: "cron(0 12 * * ? *)" # 12:00pm UTC -> 10:00pm AEST (http://crontab.org/)
+  kms_key_arn: "arn:aws:kms:ap-southeast-2:231192882420:key/19188075-111e-4502-b94c-0e0485b84b88"
+  lifecycle_delete_after: 97
+  cold_storage_after: 7
+
+log_exporter:
+  enabled: false
+  cloudwatch_logs_export_bucket: "jdtay-audit-logs-ap-southeast-2"
+
+gitlab_runner:
+  infra_deploy:
+    enabled: false
+  ci_deploy:
+    enabled: false
+
+elasticache:
+  redis:
+    - name: jdtay
+      env: prod
+      redis_node_type: "cache.t4g.medium"
+      secret_method: ssm
+      at_rest_encryption_enabled: true
+      transit_encryption_enabled: true
+      kms_key_id: "arn:aws:kms:ap-southeast-2:231192882420:key/52d47291-db81-475b-ba54-00efa3894981"
+      redis_version: "6.x"
+      allowed_cidr:
+        - cidr: "172.10.0.0/16"
+          description: VPC
+          name: VPC
+    - name: med
+      env: prod
+      redis_node_type: "cache.t4g.medium"
+      redis_failover: true
+      secret_method: ssm
+      at_rest_encryption_enabled: true
+      transit_encryption_enabled: true
+      kms_key_id: "arn:aws:kms:ap-southeast-2:231192882420:key/52d47291-db81-475b-ba54-00efa3894981"
+      redis_version: "6.x"
+      allowed_cidr:
+        - cidr: "172.10.0.0/16"
+          description: VPC
+          name: VPC
+
+buckets:
+  - name: med-jdtay-attachments
+    access_from:
+      ecs:
+        - cluster_name: "jdtay-prod-cluster"
+    statement:
+      - sid: "GiveSESPermissionToWriteEmail"
+        actions: ["s3:PutObject"]
+        effect: "Allow"
+        principals:
+          - type: Service
+            identifiers:
+              - "ses.amazonaws.com"
+        condition:
+          - test: "StringEquals"
+            variable: "aws:Referer"
+            values: ["231192882420"]
+      - sid: "GiveLambdaPermissionAccessBucket"
+        actions: ["s3:PutObject", "s3:GetObject"]
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/med-attachments-email-parser-prod-ap-southeast-2-lambdaRole"
+              - "AROAVGCRCQJC6QLL2I3D7"
+      - sid: "TempDataSyncCreateS3LocationAndTaskAccess"
+        actions:
+          - "s3:*"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/temp-data-sync-migration"
+              - "arn:aws:iam::231192882420:role/jdtayjdtayAccess"
+              - "231192882420"
+    cors_rule:
+      - allowed_headers: ["*"]
+        allowed_methods: ["GET", "HEAD"]
+        allowed_origins: ["https://med.jdtay.com.au"]
+        expose_headers: []
+
+  - name: med-jdtay-attachments-archived
+    access_from:
+      ecs:
+        - cluster_name: "jdtay-prod-cluster"
+    statement:
+      - sid: "TempDataSyncCreateS3LocationAndTaskAccess"
+        actions:
+          - "s3:*"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/temp-data-sync-migration"
+              - "arn:aws:iam::231192882420:role/jdtayjdtayAccess"
+              - "231192882420"
+  - name: med-ops
+    access_from:
+      ecs:
+        - cluster_name: "jdtay-prod-cluster"
+    statement:
+      - sid: "PublicAccess"
+        actions:
+          - "s3:GetObject"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "*"
+      - sid: "TempDataSyncCreateS3LocationAndTaskAccess"
+        actions:
+          - "s3:*"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/temp-data-sync-migration"
+              - "arn:aws:iam::231192882420:role/jdtayjdtayAccess"
+              - "231192882420"
+  - name: jdtay-cmis
+    access_from:
+      ecs:
+        - cluster_name: "jdtay-prod-cluster"
+    statement:
+      - sid: "PublicAccess"
+        actions:
+          - "s3:GetObject"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "*"
+      - sid: "TempDataSyncCreateS3LocationAndTaskAccess"
+        actions:
+          - "s3:*"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/temp-data-sync-migration"
+              - "arn:aws:iam::231192882420:role/jdtayjdtayAccess"
+              - "231192882420"
+  - name: jdtay-public
+    access_from:
+      ecs:
+        - cluster_name: "jdtay-prod-cluster"
+    statement:
+      - sid: "PublicAccess"
+        actions:
+          - "s3:GetObject"
+        effect: "Allow"
+        principals:
+          - type: "*"
+            identifiers:
+              - "*"
+      - sid: "TempDataSyncCreateS3LocationAndTaskAccess"
+        actions:
+          - "s3:*"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/temp-data-sync-migration"
+              - "arn:aws:iam::231192882420:role/jdtayjdtayAccess"
+              - "231192882420"
+  - name: jdtay-maintenance
+    object_ownership: "BucketOwnerPreferred"
+    access_from:
+      ecs:
+        - cluster_name: "jdtay-prod-cluster"
+    statement:
+      - sid: "TempDataSyncCreateS3LocationAndTaskAccess"
+        actions:
+          - "s3:*"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/temp-data-sync-migration"
+              - "arn:aws:iam::231192882420:role/jdtayjdtayAccess"
+              - "231192882420"
+  - name: jdtay-ppp-pharmacy
+    access_from:
+      ecs:
+        - cluster_name: "jdtay-prod-cluster"
+    statement:
+      - sid: "PublicAccess"
+        actions:
+          - "s3:GetObject"
+        effect: "Allow"
+        principals:
+          - type: "*"
+            identifiers:
+              - "*"
+      - sid: "TempDataSyncCreateS3LocationAndTaskAccess"
+        actions:
+          - "s3:*"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/temp-data-sync-migration"
+              - "arn:aws:iam::231192882420:role/jdtayjdtayAccess"
+              - "231192882420"
+  - name: medirecords-email
+    access_from:
+      ecs:
+        - cluster_name: "jdtay-prod-cluster"
+    statement:
+      - sid: "GiveSESPermissionToWriteEmail"
+        actions: ["s3:PutObject"]
+        effect: "Allow"
+        principals:
+          - type: Service
+            identifiers:
+              - "ses.amazonaws.com"
+        condition:
+          - test: "StringEquals"
+            variable: "aws:Referer"
+            values: ["231192882420"]
+      - sid: "GiveLambdaPermissionAccessBucket"
+        actions: ["s3:PutObject", "s3:GetObject"]
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/med-attachments-email-parser-prod-ap-southeast-2-lambdaRole"
+              - "AROAVGCRCQJC6QLL2I3D7"
+      - sid: "TempDataSyncCreateS3LocationAndTaskAccess"
+        actions:
+          - "s3:*"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/temp-data-sync-migration"
+              - "arn:aws:iam::231192882420:role/jdtayjdtayAccess"
+              - "231192882420"
+  - name: jdtay-portal
+    access_from:
+      ecs:
+        - cluster_name: "jdtay-prod-cluster"
+    statement:
+      - sid: "TempDataSyncCreateS3LocationAndTaskAccess"
+        actions:
+          - "s3:*"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/temp-data-sync-migration"
+              - "arn:aws:iam::231192882420:role/jdtayjdtayAccess"
+              - "231192882420"
+  - name: med-inventory-product
+    access_from:
+      ecs:
+        - cluster_name: "jdtay-prod-cluster"
+    statement:
+      - sid: "TempDataSyncCreateS3LocationAndTaskAccess"
+        actions:
+          - "s3:*"
+        effect: "Allow"
+        principals:
+          - type: AWS
+            identifiers:
+              - "arn:aws:iam::231192882420:role/temp-data-sync-migration"
+              - "arn:aws:iam::231192882420:role/jdtayjdtayAccess"
+              - "231192882420"
+  - name: data-engineering-hevo-dump
+    statement: []
+
+import_buckets:
+  - name: prod-jdtay-recipes-public
+
+dynamo:
+  db:
+    - name: "prod-distributed-locks-store"
+      billing_mode: "PAY_PER_REQUEST"
+      hash_key: "id"
+      partition: []
+      global_secondary_index: []
+    - name: "prod-jdtaypharma-CbCacheAddons"
+      billing_mode: "PAY_PER_REQUEST"
+      hash_key: "addon_id"
+      partition: []
+      global_secondary_index: []
+    - name: "prod-jdtaypharma-CbCacheCustomers"
+      billing_mode: "PAY_PER_REQUEST"
+      hash_key: "customer_id"
+      partition: []
+      global_secondary_index: []
+    - name: "prod-jdtaypharma-CbCacheOrders"
+      billing_mode: "PAY_PER_REQUEST"
+      hash_key: "order_id"
+      range_key: "lookup_status"
+      partition:
+        - partition_key: "lookup_customerid"
+        - partition_key: "lookup_status"
+      global_secondary_index:
+        - name_index: "lookup-CustomerID"
+          partition_key: "lookup_customerid"
+          write_capacity: 0
+          read_capacity: 0
+        - name_index: "lookup-Status"
+          partition_key: "lookup_status"
+          write_capacity: 0
+          read_capacity: 0
+    - name: "prod-jdtaypharma-CbCachePlans"
+      billing_mode: "PAY_PER_REQUEST"
+      hash_key: "plan_id"
+      partition: []
+      global_secondary_index: []
+    - name: "prod-jdtaypharma-CbCacheSubscriptions"
+      billing_mode: "PAY_PER_REQUEST"
+      hash_key: "subscription_id"
+      range_key: "lookup_customerid"
+      partition:
+        - partition_key: "lookup_customerid"
+      global_secondary_index:
+        - name_index: "lookup-CustomerID"
+          partition_key: "lookup_customerid"
+          write_capacity: 0
+          read_capacity: 0
+    - name: "prod-jdtaypharma-DynamicVars"
+      billing_mode: "PAY_PER_REQUEST"
+      hash_key: "vkey"
+      partition: []
+      global_secondary_index: []
+    - name: "prod-jdtaypharma-jdtayAdmin"
+      billing_mode: "PAY_PER_REQUEST"
+      hash_key: "uuid"
+      range_key: "email"
+      partition:
+        - partition_key: "email"
+      global_secondary_index:
+        - name_index: "lookup-Email"
+          partition_key: "email"
+          write_capacity: 0
+          read_capacity: 0
+    - name: "prod-jdtaypharma-Pharmacy"
+      billing_mode: "PAY_PER_REQUEST"
+      hash_key: "code"
+      range_key: "uuid"
+      partition:
+        - partition_key: "uuid"
+      global_secondary_index:
+        - name_index: "lookup-UUID"
+          partition_key: "uuid"
+    - name: "prod-jdtaypharma-PharmacyAdmin"
+      billing_mode: "PAY_PER_REQUEST"
+      hash_key: "uuid"
+      range_key: pharmacy_uuid
+      partition:
+        - partition_key: "pharmacy_uuid"
+        - partition_key: "email"
+      global_secondary_index:
+        - name_index: "lookup-Email"
+          partition_key: "email"
+          write_capacity: 0
+          read_capacity: 0
+        - name_index: "lookup-PharmacyUUID"
+          partition_key: "pharmacy_uuid"
+          write_capacity: 0
+          read_capacity: 0
+
+api_gateway: []
+
+s3_cloudfront:
+  enabled: false
+  root_domain: "prod.jdtay.com.au"
+  main_alternate_domain: "static.prod.jdtay.com.au"
+  distributions: []
+
+ec2_bastion: # These bastion hosts are used by Hevo to pull data from our databases, do not delete
+  enabled: true
+  allow_from_cidrs:
+    - "13.210.251.57/32"
+    - "13.238.136.87/32"
+  associate_public_ip_address: false
+  auto_scaling_group_subnets:
+    - "subnet-06e668640df83c339" #prod-Subnet-Private-A
+    - "subnet-0005c9000323f7daa" #prod-Subnet-Private-B
+    - "subnet-06476292ddc9b74d0" #prod-Subnet-Private-C
+  bastion_record_name: bastion
+  bucket_name: jdtay-bastion-prod
+  create_dns_record: true
+  elb_subnets:
+    - "subnet-032fb472ea02dd0c4" #prod-Subnet-Public-A
+    - "subnet-0c636c8980dbaf2ad" #prod-Subnet-Public-B
+    - "subnet-0a1963e5502d32c5a" #prod-Subnet-Public-C
+  hosted_zone_id: Z00810203BR5HJHOVTYYL
+  vpc_id: vpc-0093ad90831789abe
+
+redshift:
+  enabled: false
+  name: "segment-warehouse"
+  env: "prod"
+  database_name: "dev"
+  master_username: "awsuser"
+  node_type: "ra3.xlplus"
+  cluster_type: "single-node"
+
+iam:
+  enabled: true
+
+ses:
+  - domain: "prod.jdtay.com.au"
+    is_route53: true
+    create_domain_mail_from_mx: false
+    create_domain_mail_from_txt: true
+    create_amazonses_verification_record: true
+  - domain: "jdtay.com"
+    is_route53: false
+    create_domain_mail_from: false
+    create_domain_mail_from_mx: false
+    create_domain_mail_from_txt: false
+    create_amazonses_verification_record: false
+  - domain: "ahooks.jdtay.com"
+    is_route53: false
+    create_domain_mail_from: false
+    create_domain_mail_from_mx: false
+    create_domain_mail_from_txt: false
+    create_amazonses_verification_record: false
+
+datadog_agent:
+  enabled: false
+tailscale:
+  enabled: true
+  name_prefix: "jdtay-prd"
+  tailscale_api_key_secret_name: "/jdtay/prod/TAILSCALE_API_KEY"
+  datadog_api_key_secret_name: "/jdtay/prod/DATADOG_API_KEY"
+  tailnet: "get-jdtay.org.github"
+  subnet_routes:
+    - "172.10.0.0/16"  # Advertise entire VPC CIDR
+  advertise_tags:
+    - "tag:subnet-router,tag:production" # property must be a list, but only ever use a comma delimited list of tags following this format, these are the tags that are attached to the Tailscale instance and are used to determine appropriate ACLs
+  instance_type: "t3.large"
+  key_name: null  # No SSH key needed with SSM
+  min_size: 2
+  max_size: 3  # Allow scaling across multiple AZs for HA
+  desired_capacity: 2
+  tags:
+    Environment: "production"
+    Project: "infrastructure"
+    Component: "tailscale"
+atlantis:
+  enabled: false
+openvpn:
+  enabled: false

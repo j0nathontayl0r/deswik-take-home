@@ -1,0 +1,30 @@
+name: Atlantis Terraform Pipeline
+
+on:
+  pull_request:
+    paths:
+      - "**/*.tf"
+      - "**/*.tfvars"
+      - "**/workspaces/*.yaml"
+      - "atlantis.yaml"
+      - "scripts/generate-atlantis-yaml.sh"
+      - "justfile"
+
+jobs:
+  atlantis-precheck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Verify atlantis.yaml is up to date
+        run: just check-atlantis
+
+      - name: Atlantis hint
+        run: |
+          echo "Atlantis handles terraform plan/apply via PR comments."
+          echo "Example: comment 'atlantis plan' or 'atlantis apply' on the PR."

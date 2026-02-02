@@ -1,0 +1,33 @@
+# Example: Atlantis ENABLED in staging
+# File: jdtay-stg-ap-southeast-2-default.yaml
+
+aws_region: ap-southeast-2
+aws_account_id: "231192882420"
+org_name: jdtay
+account_name: stg
+environment: stg
+
+# ... your existing ECS, RDS, etc. configuration ...
+
+# ============================================================================
+# ATLANTIS ENABLED - Deploy Atlantis instance in this workspace
+# ============================================================================
+atlantis:
+  enabled: true  # <-- This is the key toggle
+  cluster_name: "jdtay-stg-cluster"
+  hostname: "atlantis.stg.jdtay.com.au"
+  certificate_arn: "arn:aws:acm:ap-southeast-2:231192882420:certificate/9e08fb51-6595-4f9e-8714-e9886905db08"
+  create_dns_record: true
+  hosted_zone: "stg.jdtay.com.au"
+  repo_allowlist: "github.com/get-jdtay/jdtay-infra"
+  allowed_assume_role_arns:
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+    - "arn:aws:iam::231192882420:role/AtlantisDeployRole"
+  cpu: 512
+  memory: 1024
+  lb_access_logs_bucket: "jdtay-audit-alb-access-logs-ap-southeast-2"

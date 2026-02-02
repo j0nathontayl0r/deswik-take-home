@@ -1,0 +1,79 @@
+name: Wake Atlantis
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - "network/**"
+      - "platform/**"
+      - "atlantis.yaml"
+
+env:
+  AWS_REGION: "ap-southeast-2"
+  AWS_ACCOUNT_ID: "231192882420"
+  ECS_CLUSTER: "jdtay-prd-cluster"
+  ECS_SERVICE: "jdtay-prd-atlantis"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  wake:
+    name: Wake Atlantis
+    runs-on: depot-ubuntu-24.04
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/CIDeployGitHub
+          role-session-name: wake-atlantis
+          role-duration-seconds: 900
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check Atlantis Status
+        id: check
+        run: |
+          RUNNING_COUNT=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query 'services[0].runningCount' \
+            --output text)
+
+          echo "running_count=$RUNNING_COUNT" >> "$GITHUB_OUTPUT"
+
+          if [ "$RUNNING_COUNT" -ge 1 ]; then
+            echo "Atlantis is already running ($RUNNING_COUNT tasks)"
+          else
+            echo "Atlantis is sleeping (0 tasks) - waking up..."
+          fi
+
+      - name: Scale Up Atlantis
+        if: steps.check.outputs.running_count == '0'
+        run: |
+          echo "Scaling Atlantis to 1 task"
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --desired-count 1 \
+            --no-cli-pager
+
+      - name: Wait for Atlantis to be Healthy
+        if: steps.check.outputs.running_count == '0'
+        run: |
+          echo "Waiting for Atlantis to become stable..."
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }}
+          echo "Atlantis is now running and healthy"
+
+      - name: Summary
+        run: |
+          echo "### Atlantis Status" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.check.outputs.running_count }}" == "0" ]; then
+            echo "Atlantis was woken up for this PR" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Atlantis was already running" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Atlantis will process your PR shortly. Comment \`atlantis plan\` if needed." >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,52 @@
+# terraform-aws-ecr
+
+<!-- markdownlint-disable MD013 -->
+
+This terraform module creates an Amazon Web Services (AWS) Elastic Container Registry
+(ECR) repository.
+
+The following resources will be created:
+
+- ECR Repository
+  - Set the Amazon ECR image scanning on push = true
+    - Amazon ECR image scanning helps in identifying software vulnerabilities in your
+      container images.
+- ECR policies
+- ECR lifecycle
+
+<!--- BEGIN_TF_DOCS --->
+
+## Requirements
+
+| Name | Version |
+|------|---------|
+| terraform | >= 0.12.31 |
+
+## Providers
+
+| Name | Version |
+|------|---------|
+| aws | n/a |
+
+## Inputs
+
+| Name | Description | Type | Default | Required |
+|------|-------------|------|---------|:--------:|
+| encryption\_type | Encryption type, KMS or AES256. When kms\_key\_arn is passed, encryption\_type is always KMS | `string` | `"KMS"` | no |
+| image\_tag\_mutability | The tag mutability setting for the repository. Must be one of: MUTABLE or IMMUTABLE. Defaults to MUTABLE. | `string` | `"MUTABLE"` | no |
+| kms\_key\_arn | KMS Key ARN to use a CMK instead of default key | `string` | `""` | no |
+| lifecycle\_policy | JSON formatted string ECR repository lifecycle policy. | `string` | `""` | no |
+| name | Name for ECR repository | `any` | n/a | yes |
+| scan\_on\_push | Configuration block that defines image scanning configuration for the repository. | `bool` | `true` | no |
+| tags | Map of tags that will be added to created resources. By default resources will be tagged with name and environment. | `map(string)` | `{}` | no |
+| trust\_accounts | Accounts to trust and allow ECR fetch | `list(string)` | n/a | yes |
+
+## Outputs
+
+| Name | Description |
+|------|-------------|
+| ecr\_arn | n/a |
+| ecr\_name | n/a |
+| ecr\_url | n/a |
+
+<!--- END_TF_DOCS --->
